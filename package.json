@@ -1,0 +1,18 @@
+{
+  "name": "mini-react",
+  "version": "1.0.0",
+  "description": "",
+  "main": "main.js",
+  "scripts": {
+    "test": "vitest"
+  },
+  "keywords": [
+    "mini",
+    "react"
+  ],
+  "author": "sixty",
+  "license": "ISC",
+  "devDependencies": {
+    "vitest": "^1.2.0"
+  }
+}
