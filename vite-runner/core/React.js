@@ -68,8 +68,19 @@ function commitWork(fiber) {
   if (!fiber) {
     return;
   }
-  // 处理当前节点
-  fiber.parent.dom.append(fiber.dom);
+  // 处理当前节点，这里注意 functionComponent 没有dom，这里需要处理
+  // 处理方式就是继续往上找 functionComponent 的父节点的dom
+  let fiberParent = fiber.parent;
+
+  // 但是如果父节点不存在（比如函数组件套函数组件），那么就需要继续往上找
+  while (!fiberParent.dom && fiberParent.parent) {
+    fiberParent = fiberParent.parent;
+  }
+
+  if (fiber.dom) {
+    fiberParent.dom.append(fiber.dom);
+  }
+
   // 处理子节点
   commitWork(fiber.child);
   // 处理兄弟节点
@@ -91,8 +102,7 @@ function updateProps(dom, props) {
     });
 }
 
-function initChildren(fiber) {
-  const children = fiber.props.children;
+function initChildren(fiber, children) {
   let preChild = null;
   children.forEach((child, index) => {
     const newFiber = {
@@ -114,29 +124,52 @@ function initChildren(fiber) {
   });
 }
 
-function preFormWorkOfUnit(fiber) {
-  // 1. 创建dom
+function updateFunctionComponent(fiber) {
+  // 3. 转换链表，设置好指针
+  const children = [fiber.type(fiber.props)];
+  initChildren(fiber, children);
+}
+
+function updateHostComponent(fiber) {
   if (!fiber.dom) {
     const dom = (fiber.dom = createDom(fiber.type));
+    // 这里是每次都将当前dom往父容器添加，这样会导致渲染任务太多，渲染卡顿
+    // 后面我们使用 统一提交的方式在链表处理完成后，再来敌对处理dom的添加
     // fiber.parent.dom.append(dom);
 
     // 2. 处理props
     updateProps(dom, fiber.props);
   }
-
   // 3. 转换链表，设置好指针
-  initChildren(fiber);
+  const children = fiber.props.children;
+
+  initChildren(fiber, children);
+}
+
+function preFormWorkOfUnit(fiber) {
+  const isFunctionComponent = typeof fiber.type === "function";
+
+  // 不是函数组件的时候才需要创建dom
+  if (isFunctionComponent) {
+    updateFunctionComponent(fiber);
+  } else {
+    updateHostComponent(fiber);
+  }
 
   // 4. 返回下一个要执行的任务
   if (fiber.child) {
     return fiber.child;
   }
 
-  if (fiber.sibling) {
-    return fiber.sibling;
+  // 这里fiber.parent 有可能不存在，那么就需要继续往上找，直到找到 fiber.parent
+  let nextFiber = fiber;
+  while (nextFiber) {
+    // 看看是否有兄弟节点，如果有就返回
+    if (nextFiber.sibling) {
+      return nextFiber.sibling;
+    }
+    nextFiber = nextFiber.parent;
   }
-
-  return fiber.parent?.sibling;
 }
 
 requestIdleCallback(workLoop);
