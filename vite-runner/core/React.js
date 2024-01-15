@@ -28,7 +28,7 @@ function render(el, container) {
     },
   };
 
-  console.log(111111);
+  root = nextWorkOfUnit;
 }
 
 // 实现Fiber
@@ -44,78 +44,103 @@ function render(el, container) {
 // 然后使用 requestIdleCallback API来检测是否能继续执行任务，如果不能继续执行任务，则会在下一次空闲时执行。
 
 let nextWorkOfUnit = null;
+let root = null;
 function workLoop(deadline) {
-  console.log(2222222, deadline.timeRemaining(), nextWorkOfUnit);
-
   let shouldYield = false;
   while (!shouldYield && nextWorkOfUnit) {
     nextWorkOfUnit = preFormWorkOfUnit(nextWorkOfUnit);
     shouldYield = deadline.timeRemaining() < 1;
   }
-  if (!shouldYield) {
-    requestIdleCallback(workLoop);
+
+  // nextWorkOfUnit 没有值的时候说明已经遍历结束了
+  if (!nextWorkOfUnit && root) {
+    commitRoot();
   }
+  requestIdleCallback(workLoop);
 }
 
-function preFormWorkOfUnit(work) {
-  console.log(333333333333333, work);
-  // 1. 创建dom
-  if (!work.dom) {
-    const dom = (work.dom =
-      work.type === "TEXT_ELEMENT"
-        ? document.createTextNode("")
-        : document.createElement(work.type));
-    work.parent.dom.appendChild(dom);
+function commitRoot() {
+  commitWork(root.child);
+  root = null;
+}
 
-    // 2. 处理props
-    const isProperty = (key) => key !== "children";
-    Object.keys(work.props)
-      .filter(isProperty)
-      .forEach((name) => {
-        dom[name] = work.props[name];
-      });
+function commitWork(fiber) {
+  if (!fiber) {
+    return;
   }
+  // 处理当前节点
+  fiber.parent.dom.append(fiber.dom);
+  // 处理子节点
+  commitWork(fiber.child);
+  // 处理兄弟节点
+  commitWork(fiber.sibling);
+}
 
-  // 3. 转换链表，设置好指针
-  const children = work.props.children;
+function createDom(type) {
+  return type === "TEXT_ELEMENT"
+    ? document.createTextNode("")
+    : document.createElement(type);
+}
+
+function updateProps(dom, props) {
+  const isProperty = (key) => key !== "children";
+  Object.keys(props)
+    .filter(isProperty)
+    .forEach((name) => {
+      dom[name] = props[name];
+    });
+}
+
+function initChildren(fiber) {
+  const children = fiber.props.children;
   let preChild = null;
-  // a. 首先遍历所有的孩子节点
   children.forEach((child, index) => {
-    const newWork = {
+    const newFiber = {
       type: child.type,
       props: child.props,
       child: null,
       sibling: null,
       dom: null,
-      parent: work,
+      parent: fiber,
     };
     // 第一个节点应该绑定到当前节点的child上
     if (index === 0) {
-      work.dom = newWork;
+      fiber.child = newFiber;
     } else {
       // 其他节点应该绑定到当前节点的 sibling 上
-      preChild.sibling = newWork;
+      preChild.sibling = newFiber;
     }
-    preChild = newWork;
+    preChild = newFiber;
   });
+}
+
+function preFormWorkOfUnit(fiber) {
+  // 1. 创建dom
+  if (!fiber.dom) {
+    const dom = (fiber.dom = createDom(fiber.type));
+    // fiber.parent.dom.append(dom);
+
+    // 2. 处理props
+    updateProps(dom, fiber.props);
+  }
+
+  // 3. 转换链表，设置好指针
+  initChildren(fiber);
+
   // 4. 返回下一个要执行的任务
-  if (work.child) {
-    console.log(4444444444);
-    return work.child;
+  if (fiber.child) {
+    return fiber.child;
   }
 
-  if (work.sibling) {
-    console.log(55555555555);
-
-    return work.sibling;
+  if (fiber.sibling) {
+    return fiber.sibling;
   }
 
-  console.log(6666666666, work.parent);
-
-  return work.parent?.sibling;
+  return fiber.parent?.sibling;
 }
 
 requestIdleCallback(workLoop);
+
 const React = {
   createElement,
   render,
