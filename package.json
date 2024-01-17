@@ -1,18 +1,16 @@
 {
-  "name": "mini-react",
-  "version": "1.0.0",
-  "description": "",
-  "main": "main.js",
+  "name": "vite-runner",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
   "scripts": {
-    "test": "vitest"
+    "dev": "vite",
+    "build": "vite build",
+    "test": "vitest",
+    "preview": "vite preview"
   },
-  "keywords": [
-    "mini",
-    "react"
-  ],
-  "author": "sixty",
-  "license": "ISC",
   "devDependencies": {
+    "vite": "^5.0.8",
     "vitest": "^1.2.0"
   }
 }
