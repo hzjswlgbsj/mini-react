@@ -1,17 +1,30 @@
 import React from "./core/React.js";
 
+let count = 10;
+let props = {
+  id: "11111",
+};
 function Counter({ num }) {
-  return <div>counter: {num}</div>;
+  return (
+    <div {...props} style="display: flex">
+      <div>counter: {count}</div>
+      <button id="id" msg="点我" onClick={handleClick}>
+        点击
+      </button>
+    </div>
+  );
 }
 
-function CounterContainer() {
-  return <Counter num={1}></Counter>;
-}
+const handleClick = (e) => {
+  console.log("click", e);
+  count++;
+  props = {};
+  React.update();
+};
 // const App = React.createElement("div", { id: "app" }, "hi-", "app");
 const App = (
   <div>
-    hi-app
-    <Counter num={1}></Counter>
+    <span>hi-app</span>
     <Counter num={2}></Counter>
   </div>
 );

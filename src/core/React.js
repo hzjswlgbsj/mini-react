@@ -1,3 +1,10 @@
+const EFFECT_TAG_PLACEMENT = "PLACEMENT";
+const EFFECT_TAG_UPDATE = "UPDATE";
+const EFFECT_TAG_DELETION = "DELETION";
+const PLACEMENT = "PLACEMENT";
+const UPDATE = "UPDATE";
+const DELETION = "DELETION";
+
 function createElement(type, props, ...children) {
   return {
     type,
@@ -45,6 +52,7 @@ function render(el, container) {
 
 let nextWorkOfUnit = null;
 let root = null;
+let currentRoot = null;
 function workLoop(deadline) {
   let shouldYield = false;
   while (!shouldYield && nextWorkOfUnit) {
@@ -61,6 +69,7 @@ function workLoop(deadline) {
 
 function commitRoot() {
   commitWork(root.child);
+  currentRoot = root;
   root = null;
 }
 
@@ -77,8 +86,18 @@ function commitWork(fiber) {
     fiberParent = fiberParent.parent;
   }
 
-  if (fiber.dom) {
-    fiberParent.dom.append(fiber.dom);
+  // 根据fiber的 effectTag 来处理
+  if (fiber.effectTag === EFFECT_TAG_PLACEMENT) {
+    // 新增节点
+    if (fiber.dom) {
+      fiberParent.dom.append(fiber.dom);
+    }
+  } else if (fiber.effectTag === EFFECT_TAG_UPDATE) {
+    // 更新节点
+    updateProps(fiber.dom, fiber.props, fiber.alternate?.props);
+  } else if (fiber.effectTag === EFFECT_TAG_DELETION) {
+    // 删除节点
+    // commitDeletion(fiberParent, fiber);
   }
 
   // 处理子节点
@@ -93,26 +112,120 @@ function createDom(type) {
     : document.createElement(type);
 }
 
-function updateProps(dom, props) {
-  const isProperty = (key) => key !== "children";
-  Object.keys(props)
-    .filter(isProperty)
-    .forEach((name) => {
-      dom[name] = props[name];
-    });
+// 我们要如何做到更新所有的 props 呢，那肯定是要 新旧VDOM 对比 ，那我们需要解决三个问题 ：
+// 1. 如何得到新的 DOM 树
+// 2. 如何找到老的节点
+// 3. 如何 diff props
+
+// 1. 如何得到新的 DOM 树？
+// 回忆一下初始化的时候是怎么得到的 DOM 树，是执行 render 的时候得到的一个的DOM树，通过给 nextWorkOfUnit 不断地赋值，在每个 Fiber 的 dom 属性上就形成了 DOM 树。那么我们更新的时候想要生成 DOM 树的话可以直接执行 render 一样的逻辑，结束后然后把此时的 dom 和 props 保存下来就是当前新的 currentRoot 了。
+
+// 2. 如何找到老的节点？
+// 最简单粗暴的方法当然是直接遍历整个 Fiber 树，然后在节点的 dom 中找到要更新的节点。
+
+// 但是，这个效率太低了，我改一个属性也得遍历一遍树，这明显太累了。其他办法那肯定是有的。
+
+// 之前已经在老 root 提交完后将它保存下来了，放到了 currentRoot 中了，那么我们新创建的节点在转化成新链表的时候我们可以顺便添加一个属性 alternate，把这个属性的指针指向老的 Fiber 节点。
+
+// 首先我们有老的结构的 root （保存在 currentRoot）中的，那我们新的 root 节点在第一步创建的时候可以将 alternate 指向 currentRoot。
+
+// 下一步到新root的下一个节点的时候，我们需要找到老节点对应的下一个节点，这里老节点的下一个节点我们可以通过 currentRoot 的 child 找到。
+
+// 中间我们会遇到 sibling ，新的 Fiber 树在创建的时候也会有 sibling 的关系，我们查找老的树的对应节点也去 sibling 属性找就是了。
+
+// 就这样依次创建，依次将心树的每个节点的 alternate 属性正确的指向，到最后形成的新的 Fiber 树的每一个节点都带着与之对应的老的树的节点，这样下一步就可以为每个节点做 diff 逻辑了。
+
+// 3. 如何 diff props
+
+// 对比新旧 fiber 对比策略：
+// 1. 新老 fiber 的 type 是否相同，相同就是更新，不同就是创建
+// 2. 新老 fiber 的 props 是否相同
+// 对比新旧 props 对比策略
+// 1. 老的有新的没有，delete
+// 2. 新的有老的没有，add
+// 3. 老的有新的也有，update
+// 2 3可以合并为3，因为老的没有就是undefined，直接判断是否相等的时候也会被判断为不相等，就会会添加进去
+
+function updateProps(dom, nextProps, prevProps) {
+  // const isProperty = (key) => key !== "children";
+  // Object.keys(nextProps)
+  //   .filter(isProperty)
+  //   .forEach((name) => {
+  //     // 处理事件
+  //     if (name.startsWith("on")) {
+  //       const eventName = name.toLowerCase().substring(2);
+  //       dom.addEventListener(eventName, nextProps[name]);
+  //     } else if (name === "className") {
+  //       dom.setAttribute("class", nextProps[name]);
+  //     } else {
+  //       dom[name] = nextProps[name];
+  //     }
+  //   });
+
+  // 1. 老的有新的没有，delete，遍历老的 props
+  Object.keys(prevProps).forEach((key) => {
+    if (key !== "children") {
+      if (!(key in nextProps)) {
+        // 老的有新的没有，delete
+        dom.removeAttribute(key);
+      }
+    }
+  });
+  // 2. 新的有老的没有，add； 3. 老的有新的也有，update
+  // 2 3可以合并为3，因为老的没有就是undefined，直接判断是否相等的时候也会被判断为不相等，就会会添加进去
+  // 遍历新的 props
+  Object.keys(nextProps).forEach((key) => {
+    if (key !== "children") {
+      if (prevProps[key] !== nextProps[key]) {
+        // 新的有老的没有，add
+        // 处理事件
+        if (key.startsWith("on")) {
+          const eventName = key.toLowerCase().substring(2);
+          dom.removeEventListener(eventName, nextProps[key]);
+          dom.addEventListener(eventName, nextProps[key]);
+        } else if (key === "className") {
+          dom.setAttribute("class", nextProps[key]);
+        } else {
+          dom[key] = nextProps[key];
+        }
+      }
+    }
+  });
 }
 
 function initChildren(fiber, children) {
+  let oldFiber = fiber.alternate?.child;
   let preChild = null;
   children.forEach((child, index) => {
-    const newFiber = {
-      type: child.type,
-      props: child.props,
-      child: null,
-      sibling: null,
-      dom: null,
-      parent: fiber,
-    };
+    // 对比新老 fiber
+    // 对比策略：1. 新老 fiber 的 type 是否相同，想通就是更新，不同就是创建 2. 新老 fiber 的 props 是否相同
+    const isSameType = oldFiber && oldFiber.type === child.type;
+    let newFiber = null;
+    if (isSameType) {
+      // 新老 fiber type 相同，表示 update
+      newFiber = {
+        type: child.type,
+        props: child.props,
+        child: null,
+        sibling: null,
+        dom: oldFiber.dom,
+        parent: fiber,
+        effectTag: EFFECT_TAG_UPDATE, // 后续再commit work的时候需要区分，所以增加这个属性，PLACEMENT 表示更新
+        alternate: oldFiber, // 若果是更新的话，这里指向老的 fiber 节点，用于后面做对比
+      };
+    } else {
+      // create
+      newFiber = {
+        type: child.type,
+        props: child.props,
+        child: null,
+        sibling: null,
+        dom: null,
+        parent: fiber,
+        effectTag: EFFECT_TAG_PLACEMENT, // 后续再commit work的时候需要区分，所以增加这个属性，PLACEMENT 表示创建
+      };
+    }
+
     // 第一个节点应该绑定到当前节点的child上
     if (index === 0) {
       fiber.child = newFiber;
@@ -120,7 +233,14 @@ function initChildren(fiber, children) {
       // 其他节点应该绑定到当前节点的 sibling 上
       preChild.sibling = newFiber;
     }
+
+    // 更新指针
     preChild = newFiber;
+
+    // 这里还有一个情况需要处理：就是当前节点不止一个child，那下一次遍历的时候 oldFiber 指针就要更新为当前 oldFiber 节点的 sibling
+    if (oldFiber) {
+      oldFiber = oldFiber.sibling;
+    }
   });
 }
 
@@ -138,7 +258,7 @@ function updateHostComponent(fiber) {
     // fiber.parent.dom.append(dom);
 
     // 2. 处理props
-    updateProps(dom, fiber.props);
+    updateProps(dom, fiber.props, {});
   }
   // 3. 转换链表，设置好指针
   const children = fiber.props.children;
@@ -174,7 +294,18 @@ function preFormWorkOfUnit(fiber) {
 
 requestIdleCallback(workLoop);
 
+function update() {
+  nextWorkOfUnit = {
+    dom: currentRoot.dom,
+    props: currentRoot.props,
+    alternate: currentRoot, // 指向上一个旧的 fiber 节点
+  };
+
+  root = nextWorkOfUnit;
+}
+
 const React = {
+  update,
   createElement,
   render,
 };
