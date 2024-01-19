@@ -1,21 +1,6 @@
 const EFFECT_TAG_PLACEMENT = "PLACEMENT";
 const EFFECT_TAG_UPDATE = "UPDATE";
 const EFFECT_TAG_DELETION = "DELETION";
-const PLACEMENT = "PLACEMENT";
-const UPDATE = "UPDATE";
-const DELETION = "DELETION";
-
-function createElement(type, props, ...children) {
-  return {
-    type,
-    props: {
-      ...props,
-      children: children.map((child) =>
-        typeof child === "object" ? child : createTextNode(child)
-      ),
-    },
-  };
-}
 
 function createTextNode(text) {
   return {
@@ -27,15 +12,29 @@ function createTextNode(text) {
   };
 }
 
+function createElement(type, props, ...children) {
+  return {
+    type,
+    props: {
+      ...props,
+      children: children.map((child) => {
+        const isTextNode =
+          typeof child === "string" || typeof child === "number";
+        return isTextNode ? createTextNode(child) : child;
+      }),
+    },
+  };
+}
+
 function render(el, container) {
-  nextWorkOfUnit = {
+  wipRoot = {
     dom: container,
     props: {
       children: [el],
     },
   };
 
-  root = nextWorkOfUnit;
+  nextWorkOfUnit = wipRoot;
 }
 
 // 实现Fiber
@@ -50,9 +49,11 @@ function render(el, container) {
 // 使用深度优先遍历不断地返回下一个节点，我们不用先将整棵树先转化为链表再执行渲染任务，而是当前节点任务执行完后，直接就返回下一个节点的渲染任务。
 // 然后使用 requestIdleCallback API来检测是否能继续执行任务，如果不能继续执行任务，则会在下一次空闲时执行。
 
-let nextWorkOfUnit = null;
-let root = null;
+/** root一直在被更新，所以叫wipRoot */
+let wipRoot = null;
 let currentRoot = null;
+let nextWorkOfUnit = null;
+let deletions = [];
 function workLoop(deadline) {
   let shouldYield = false;
   while (!shouldYield && nextWorkOfUnit) {
@@ -61,16 +62,30 @@ function workLoop(deadline) {
   }
 
   // nextWorkOfUnit 没有值的时候说明已经遍历结束了
-  if (!nextWorkOfUnit && root) {
+  if (!nextWorkOfUnit && wipRoot) {
     commitRoot();
   }
   requestIdleCallback(workLoop);
 }
 
 function commitRoot() {
-  commitWork(root.child);
-  currentRoot = root;
-  root = null;
+  deletions.forEach(commitDeletion);
+  commitWork(wipRoot.child);
+  currentRoot = wipRoot;
+  wipRoot = null;
+  deletions = [];
+}
+
+function commitDeletion(fiber) {
+  if (fiber.dom) {
+    let fiberParent = fiber.parent;
+    while (!fiberParent.dom) {
+      fiberParent = fiberParent.parent;
+    }
+    fiberParent.dom.removeChild(fiber.dom);
+  } else {
+    commitDeletion(fiber.child);
+  }
 }
 
 function commitWork(fiber) {
@@ -147,21 +162,6 @@ function createDom(type) {
 // 2 3可以合并为3，因为老的没有就是undefined，直接判断是否相等的时候也会被判断为不相等，就会会添加进去
 
 function updateProps(dom, nextProps, prevProps) {
-  // const isProperty = (key) => key !== "children";
-  // Object.keys(nextProps)
-  //   .filter(isProperty)
-  //   .forEach((name) => {
-  //     // 处理事件
-  //     if (name.startsWith("on")) {
-  //       const eventName = name.toLowerCase().substring(2);
-  //       dom.addEventListener(eventName, nextProps[name]);
-  //     } else if (name === "className") {
-  //       dom.setAttribute("class", nextProps[name]);
-  //     } else {
-  //       dom[name] = nextProps[name];
-  //     }
-  //   });
-
   // 1. 老的有新的没有，delete，遍历老的 props
   Object.keys(prevProps).forEach((key) => {
     if (key !== "children") {
@@ -176,12 +176,12 @@ function updateProps(dom, nextProps, prevProps) {
   // 遍历新的 props
   Object.keys(nextProps).forEach((key) => {
     if (key !== "children") {
-      if (prevProps[key] !== nextProps[key]) {
+      if (nextProps[key] !== prevProps[key]) {
         // 新的有老的没有，add
         // 处理事件
         if (key.startsWith("on")) {
           const eventName = key.toLowerCase().substring(2);
-          dom.removeEventListener(eventName, nextProps[key]);
+          dom.removeEventListener(eventName, prevProps[key]);
           dom.addEventListener(eventName, nextProps[key]);
         } else if (key === "className") {
           dom.setAttribute("class", nextProps[key]);
@@ -193,12 +193,18 @@ function updateProps(dom, nextProps, prevProps) {
   });
 }
 
-function initChildren(fiber, children) {
+/**
+ * 调和Fiber结构，包含更新时候做的diff
+ * @param {*} fiber Fiber链表节点
+ * @param {*} children 子DOM或者子组件
+ */
+function reconcileChildren(fiber, children) {
   let oldFiber = fiber.alternate?.child;
-  let preChild = null;
+  let prevChild = null;
+
   children.forEach((child, index) => {
     // 对比新老 fiber
-    // 对比策略：1. 新老 fiber 的 type 是否相同，想通就是更新，不同就是创建 2. 新老 fiber 的 props 是否相同
+    // 对比策略：1. 新老 fiber 的 type 是否相同，相同就是更新，不同就是创建 2. 新老 fiber 的 props 是否相同
     const isSameType = oldFiber && oldFiber.type === child.type;
     let newFiber = null;
     if (isSameType) {
@@ -215,15 +221,28 @@ function initChildren(fiber, children) {
       };
     } else {
       // create
-      newFiber = {
-        type: child.type,
-        props: child.props,
-        child: null,
-        sibling: null,
-        dom: null,
-        parent: fiber,
-        effectTag: EFFECT_TAG_PLACEMENT, // 后续再commit work的时候需要区分，所以增加这个属性，PLACEMENT 表示创建
-      };
+      if (child) {
+        newFiber = {
+          type: child.type,
+          props: child.props,
+          child: null,
+          sibling: null,
+          dom: null,
+          parent: fiber,
+          effectTag: EFFECT_TAG_PLACEMENT, // 后续再commit work的时候需要区分，所以增加这个属性，PLACEMENT 表示创建
+        };
+      }
+
+      // delete
+      if (oldFiber) {
+        // 收集需要被删除的fiber
+        deletions.push(oldFiber);
+      }
+    }
+
+    // 这里还有一个情况需要处理：就是当前节点不止一个child，那下一次遍历的时候 oldFiber 指针就要更新为当前 oldFiber 节点的 sibling
+    if (oldFiber) {
+      oldFiber = oldFiber.sibling;
     }
 
     // 第一个节点应该绑定到当前节点的child上
@@ -231,23 +250,26 @@ function initChildren(fiber, children) {
       fiber.child = newFiber;
     } else {
       // 其他节点应该绑定到当前节点的 sibling 上
-      preChild.sibling = newFiber;
+      prevChild.sibling = newFiber;
     }
 
     // 更新指针
-    preChild = newFiber;
-
-    // 这里还有一个情况需要处理：就是当前节点不止一个child，那下一次遍历的时候 oldFiber 指针就要更新为当前 oldFiber 节点的 sibling
-    if (oldFiber) {
-      oldFiber = oldFiber.sibling;
+    if (newFiber) {
+      prevChild = newFiber;
     }
   });
+
+  // 新的比老的短，那么老的删除不全，所以需要继续收集老的长出来的那一段
+  while (oldFiber) {
+    deletions.push(oldFiber);
+    oldFiber = oldFiber.sibling;
+  }
 }
 
 function updateFunctionComponent(fiber) {
   // 3. 转换链表，设置好指针
   const children = [fiber.type(fiber.props)];
-  initChildren(fiber, children);
+  reconcileChildren(fiber, children);
 }
 
 function updateHostComponent(fiber) {
@@ -262,8 +284,7 @@ function updateHostComponent(fiber) {
   }
   // 3. 转换链表，设置好指针
   const children = fiber.props.children;
-
-  initChildren(fiber, children);
+  reconcileChildren(fiber, children);
 }
 
 function preFormWorkOfUnit(fiber) {
@@ -295,13 +316,13 @@ function preFormWorkOfUnit(fiber) {
 requestIdleCallback(workLoop);
 
 function update() {
-  nextWorkOfUnit = {
+  wipRoot = {
     dom: currentRoot.dom,
     props: currentRoot.props,
     alternate: currentRoot, // 指向上一个旧的 fiber 节点
   };
 
-  root = nextWorkOfUnit;
+  nextWorkOfUnit = wipRoot;
 }
 
 const React = {
