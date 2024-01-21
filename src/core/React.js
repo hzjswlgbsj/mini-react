@@ -54,10 +54,16 @@ let wipRoot = null;
 let currentRoot = null;
 let nextWorkOfUnit = null;
 let deletions = [];
+let wipFiber = null;
 function workLoop(deadline) {
   let shouldYield = false;
   while (!shouldYield && nextWorkOfUnit) {
     nextWorkOfUnit = preFormWorkOfUnit(nextWorkOfUnit);
+
+    // 优化：本次workLoop的当前节点被更新，那他的兄弟节点肯定就不需要更新，减少计算将nextWorkOfUnit置空跳出循环
+    if (wipRoot?.sibling?.type === nextWorkOfUnit?.type) {
+      nextWorkOfUnit = null;
+    }
     shouldYield = deadline.timeRemaining() < 1;
   }
 
@@ -267,8 +273,16 @@ function reconcileChildren(fiber, children) {
 }
 
 function updateFunctionComponent(fiber) {
-  // 3. 转换链表，设置好指针
+  // 初始化stateHooks
+  stateHooks = [];
+  stateHookIndex = 0;
+
+  // 保存一下当前更新的Fiber
+  wipFiber = fiber;
+
   const children = [fiber.type(fiber.props)];
+
+  // 3. 转换链表，设置好指针
   reconcileChildren(fiber, children);
 }
 
@@ -316,16 +330,50 @@ function preFormWorkOfUnit(fiber) {
 requestIdleCallback(workLoop);
 
 function update() {
-  wipRoot = {
-    dom: currentRoot.dom,
-    props: currentRoot.props,
-    alternate: currentRoot, // 指向上一个旧的 fiber 节点
+  // 拿到此时需要被更新的Fiber
+  let currentFiber = wipFiber;
+
+  // 使用闭包将 wipRoot 保存起来，这样就得到了一个update的方法，包含了当前需要更新的fiber
+  return () => {
+    wipRoot = {
+      ...currentFiber,
+      alternate: currentFiber, // 指向上一个旧的 fiber 节点
+    };
+
+    nextWorkOfUnit = wipRoot;
+  };
+}
+
+let stateHooks;
+let stateHookIndex;
+function useState(initialState) {
+  let currentFiber = wipFiber;
+  const oldHook = currentFiber.alternate?.stateHooks[stateHookIndex];
+  const stateHook = {
+    state: oldHook ? oldHook.state : initialState,
   };
 
-  nextWorkOfUnit = wipRoot;
+  // 保存stateHook
+  stateHookIndex++;
+  stateHooks.push(stateHook);
+  currentFiber.stateHooks = stateHooks;
+
+  function setState(action) {
+    stateHook.state = action(stateHook.state);
+
+    wipRoot = {
+      ...currentFiber,
+      alternate: currentFiber,
+    };
+
+    nextWorkOfUnit = wipRoot;
+  }
+
+  return [stateHook.state, setState];
 }
 
 const React = {
+  useState,
   update,
   createElement,
   render,
