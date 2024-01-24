@@ -351,7 +351,16 @@ function useState(initialState) {
   const oldHook = currentFiber.alternate?.stateHooks[stateHookIndex];
   const stateHook = {
     state: oldHook ? oldHook.state : initialState,
+    queue: oldHook ? oldHook.queue : [],
   };
+
+  // 批量执行action
+  stateHook.queue.forEach((action) => {
+    stateHook.state = action(stateHook.state);
+  });
+
+  // 执行完后清空
+  stateHook.queue = [];
 
   // 保存stateHook
   stateHookIndex++;
@@ -359,7 +368,15 @@ function useState(initialState) {
   currentFiber.stateHooks = stateHooks;
 
   function setState(action) {
-    stateHook.state = action(stateHook.state);
+    // 提前检测一下state是否改变，如果没有改变的话就不再继续
+    const eagerState =
+      typeof action === "function" ? action(stateHook.state) : action;
+    if (eagerState === stateHook.state) {
+      return;
+    }
+
+    // 将更新state任务收集起来
+    stateHook.queue.push(typeof action === "function" ? action : () => action);
 
     wipRoot = {
       ...currentFiber,
