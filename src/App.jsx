@@ -94,22 +94,63 @@
 // export default App;
 
 // // ---------------case: 实现useState---------------------
+// import React from "./core/React.js";
+
+// function Foo() {
+//   const [count, setCount] = React.useState(10);
+//   const [msg, setMsg] = React.useState("msg");
+
+//   function addCount() {
+//     setCount((count) => count + 1);
+//     setMsg((msg) => msg + "+");
+//   }
+
+//   return (
+//     <div>
+//       count: {count}
+//       <div></div>
+//       msg: {msg}
+//       <button onClick={addCount}>click</button>
+//     </div>
+//   );
+// }
+
+// function App() {
+//   return (
+//     <div>
+//       hi app
+//       <Foo></Foo>
+//     </div>
+//   );
+// }
+// export default App;
+
+// // ---------------case: 实现useEffect---------------------
 import React from "./core/React.js";
 
 function Foo() {
   const [count, setCount] = React.useState(10);
-  const [msg, setMsg] = React.useState("msg");
+  const [count2, setCount2] = React.useState(10);
+
+  React.useEffect(() => {
+    console.log("count发生了改变", count);
+  }, [count]);
+
+  React.useEffect(() => {
+    console.log("count2发生了改变", count);
+  }, [count2]);
 
   function addCount() {
     setCount((count) => count + 1);
-    setMsg((msg) => msg + "+");
+    setCount2(count + 1);
   }
 
   return (
     <div>
       count: {count}
       <div></div>
-      msg: {msg}
+      count2: {count2}
+      <div></div>
       <button onClick={addCount}>click</button>
     </div>
   );

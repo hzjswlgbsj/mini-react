@@ -77,9 +77,43 @@ function workLoop(deadline) {
 function commitRoot() {
   deletions.forEach(commitDeletion);
   commitWork(wipRoot.child);
+  commitEffectHooks();
   currentRoot = wipRoot;
   wipRoot = null;
   deletions = [];
+}
+
+function commitEffectHooks() {
+  function run(fiber) {
+    if (!fiber) return;
+
+    // 判断是初始化还是因为depends变化，更新
+    // 如果Fiber节点上不存在alternate属性，则说明是初始化,否则是更新了
+    if (!fiber.alternate) {
+      // init
+      fiber.effectHooks?.forEach((effectHook) => effectHook.callback());
+    } else {
+      // update
+      // 对比依赖
+      fiber.effectHooks?.forEach((newEffectHook, index) => {
+        const oldEffectHook = fiber.alternate?.effectHooks[index];
+        const needUpdate = oldEffectHook?.dependencies.some(
+          (oldDep, i) => oldDep !== newEffectHook?.dependencies[i]
+        );
+        needUpdate && newEffectHook?.callback();
+      });
+    }
+
+    if (fiber.child) {
+      run(fiber.child);
+    }
+
+    if (fiber.sibling) {
+      run(fiber.sibling);
+    }
+  }
+
+  run(wipRoot);
 }
 
 function commitDeletion(fiber) {
@@ -277,6 +311,9 @@ function updateFunctionComponent(fiber) {
   stateHooks = [];
   stateHookIndex = 0;
 
+  // 初始化effectHooks
+  effectHooks = [];
+
   // 保存一下当前更新的Fiber
   wipFiber = fiber;
 
@@ -389,7 +426,25 @@ function useState(initialState) {
   return [stateHook.state, setState];
 }
 
+let effectHooksCleanup;
+let effectHooks;
+/**
+ * useEffect的渲染时机应该是 React 完成对 DOM 的渲染后，并且浏览器完成绘制之前，也就是commitWork之后
+ * @param {() => () => void} callback 回调函数，可以返回一个cleanup函数
+ * @param {*} dependencies 依赖项
+ */
+function useEffect(callback, dependencies) {
+  const effectHook = {
+    callback,
+    dependencies,
+  };
+
+  effectHooks.push(effectHook);
+  wipFiber.effectHooks = effectHooks;
+}
+
 const React = {
+  useEffect,
   useState,
   update,
   createElement,
