@@ -96,11 +96,13 @@ function commitEffectHooks() {
       // update
       // 对比依赖
       fiber.effectHooks?.forEach((newEffectHook, index) => {
-        const oldEffectHook = fiber.alternate?.effectHooks[index];
-        const needUpdate = oldEffectHook?.dependencies.some(
-          (oldDep, i) => oldDep !== newEffectHook?.dependencies[i]
-        );
-        needUpdate && newEffectHook?.callback();
+        if (newEffectHook.dependencies.length) {
+          const oldEffectHook = fiber.alternate?.effectHooks[index];
+          const needUpdate = oldEffectHook?.dependencies.some(
+            (oldDep, i) => oldDep !== newEffectHook?.dependencies[i]
+          );
+          needUpdate && newEffectHook?.callback();
+        }
       });
     }
 

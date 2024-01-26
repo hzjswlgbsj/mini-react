@@ -142,7 +142,7 @@ function Foo() {
 
   function addCount() {
     setCount((count) => count + 1);
-    setCount2(count + 1);
+    // setCount2(count + 1);
   }
 
   return (
