@@ -134,10 +134,16 @@ function Foo() {
 
   React.useEffect(() => {
     console.log("count发生了改变", count);
+    return () => {
+      console.log("count被卸载了");
+    };
   }, [count]);
 
   React.useEffect(() => {
     console.log("count2发生了改变", count);
+    return () => {
+      console.log("count2被卸载了");
+    };
   }, [count2]);
 
   function addCount() {

@@ -91,7 +91,9 @@ function commitEffectHooks() {
     // 如果Fiber节点上不存在alternate属性，则说明是初始化,否则是更新了
     if (!fiber.alternate) {
       // init
-      fiber.effectHooks?.forEach((effectHook) => effectHook.callback());
+      fiber.effectHooks?.forEach((effectHook) => {
+        effectHook.cleanup = effectHook.callback();
+      });
     } else {
       // update
       // 对比依赖
@@ -101,7 +103,7 @@ function commitEffectHooks() {
           const needUpdate = oldEffectHook?.dependencies.some(
             (oldDep, i) => oldDep !== newEffectHook?.dependencies[i]
           );
-          needUpdate && newEffectHook?.callback();
+          needUpdate && (newEffectHook.cleanup = newEffectHook?.callback());
         }
       });
     }
@@ -115,6 +117,29 @@ function commitEffectHooks() {
     }
   }
 
+  function cleanup(fiber) {
+    if (!fiber) return;
+    // 去执行之前的节点，去执行之前节点的cleanup，cleanup的执行时机是useEffect执行完了后
+    // 下一次再来执行的时候，所以当前正执行的Fiber，应该去执行之前一个Fiber的cleanup
+    fiber.alternate?.effectHooks?.forEach((effectHook) => {
+      // 当依赖是空数组的时候不需要执行cleanup
+      if (effectHook.dependencies.length && effectHook.cleanup) {
+        effectHook.cleanup();
+      }
+    });
+
+    // 然后去执行孩子节点
+    if (fiber.child) {
+      cleanup(fiber.child);
+    }
+
+    // 然后去执行兄弟节点
+    if (fiber.sibling) {
+      cleanup(fiber.sibling);
+    }
+  }
+
+  cleanup(wipRoot);
   run(wipRoot);
 }
 
@@ -428,7 +453,6 @@ function useState(initialState) {
   return [stateHook.state, setState];
 }
 
-let effectHooksCleanup;
 let effectHooks;
 /**
  * useEffect的渲染时机应该是 React 完成对 DOM 的渲染后，并且浏览器完成绘制之前，也就是commitWork之后
@@ -439,6 +463,7 @@ function useEffect(callback, dependencies) {
   const effectHook = {
     callback,
     dependencies,
+    cleanup: null,
   };
 
   effectHooks.push(effectHook);
